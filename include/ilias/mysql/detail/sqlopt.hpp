@@ -62,7 +62,7 @@ public:
     // virtual auto getopt(MYSQL &sql) const -> int = 0;
 };
 
-template <int Optname, typename T, class enable = void>
+template <mysql_option Optname, typename T, class enable = void>
 class OptionT : public OptionBase {
 public:
     constexpr OptionT() = default;
@@ -70,7 +70,7 @@ public:
     auto setopt(MYSQL &sql) const -> int override {
         auto ret = mysql_optionsv(&sql, Optname, mValue);
         if (ret != 0) {
-            ILIAS_ERROR("sql", "option{} set error({})", Optname, ret);
+            ILIAS_ERROR("sql", "option{} set error({})", (int)Optname, ret);
         }
         return ret;
     }
@@ -99,7 +99,7 @@ private:
     T mValue {};
 };
 
-template <int Optname, typename T>
+template <mysql_option Optname, typename T>
 class OptionT<Optname, T *, void> : public OptionBase {
 public:
     constexpr OptionT() = default;
@@ -107,7 +107,7 @@ public:
     auto setopt(MYSQL &sql) const -> int override {
         auto ret = mysql_optionsv(&sql, Optname, (void *)&mValue);
         if (ret != 0) {
-            ILIAS_ERROR("sql", "option{} set error({})", Optname, ret);
+            ILIAS_ERROR("sql", "option{} set error({})", (int)Optname, ret);
         }
         return ret;
     }
@@ -136,7 +136,7 @@ private:
     T mValue {};
 };
 
-template <int Optname>
+template <mysql_option Optname>
 class OptionT<Optname, std::string, void> : public OptionBase {
 public:
     constexpr OptionT() = default;
@@ -144,7 +144,7 @@ public:
     auto setopt(MYSQL &sql) const -> int override {
         auto ret = mysql_optionsv(&sql, Optname, mValue == "" ? nullptr : (void *)mValue.c_str());
         if (ret != 0) {
-            ILIAS_ERROR("sql", "option{} set error({})", Optname, ret);
+            ILIAS_ERROR("sql", "option{} set error({})", (int)Optname, ret);
         }
         return ret;
     }

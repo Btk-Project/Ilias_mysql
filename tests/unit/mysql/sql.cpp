@@ -14,6 +14,8 @@ struct Person {
     std::string            email;
     SqlDate                born;
     std::vector<std::byte> promise;
+    char                   val1;
+    int                    val2;
 };
 
 ILIAS_NAMESPACE::Task<void> test() {
@@ -22,6 +24,7 @@ ILIAS_NAMESPACE::Task<void> test() {
     db.setUserName("root");
     db.setPassword("123456");
     db.setPort(3306);
+    db.setOption(sqlopt::InitCommand("SET NAMES 'utf8mb4'"));
     auto ret1 = co_await db.open();
     EXPECT_TRUE(ret1.has_value());
     if (!ret1.has_value()) {
@@ -51,7 +54,7 @@ ILIAS_NAMESPACE::Task<void> test() {
     // varchar(255)
     ret = co_await query.execute(
         "CREATE TABLE IF NOT EXISTS test_table (id INT NOT NULL PRIMARY KEY, name VARCHAR(255) NOT "
-        "NULL, age INT, born DATE, email VARCHAR(255) UNIQUE, promise BLOB(1000))");
+        "NULL, age INT, born DATETIME, email VARCHAR(255) UNIQUE, promise BLOB(1000), val1 TINYINT, val2 MEDIUMINT)");
     EXPECT_TRUE(ret.has_value());
     if (!ret.has_value()) {
         co_return;
@@ -59,15 +62,43 @@ ILIAS_NAMESPACE::Task<void> test() {
     // insert 0001, test, 18, 2000-01-01, test@test.com
     // insert 0002, 小明, 19, 2001-01-01, xiaoming@test.com
     std::vector<Person> persons = {
-        {1, "a test user", 18, "test@test.com", SqlDate(2025, 1, 20), {std::byte {1}, std::byte {2}, std::byte {0}}},
-        {2, "王小明", 19, "xiaoming@test.com", SqlDate(2025, 1, 21), {std::byte {1}, std::byte {0}, std::byte {3}}},
-        {3, "Alice", 18, "Alice@test.com", SqlDate(2025, 1, 22), {std::byte {1}, std::byte {2}, std::byte {5}}},
-        {4, "Bob", 18, "Bob@test.com", SqlDate(2025, 1, 20), {std::byte {3}, std::byte {2}, std::byte {3}}},
+        {1,
+         "a test user",
+         18,
+         "test@test.com",
+         SqlDate(2025, 6, 20, 1, 1, 1),
+         {std::byte {1}, std::byte {2}, std::byte {0}},
+         1,
+         234},
+        {2,
+         "王小明",
+         19,
+         "xiaoming@test.com",
+         SqlDate(2025, 4, 21, 15, 23, 13),
+         {std::byte {1}, std::byte {0}, std::byte {3}},
+         0,
+         145},
+        {3,
+         "Alice",
+         18,
+         "Alice@test.com",
+         SqlDate(2025, 2, 22, 12, 23, 23),
+         {std::byte {1}, std::byte {2}, std::byte {5}},
+         3,
+         345},
+        {4,
+         "Bob",
+         18,
+         "Bob@test.com",
+         SqlDate(2025, 1, 20, 23, 12, 32),
+         {std::byte {3}, std::byte {2}, std::byte {3}},
+         123,
+         434},
     };
     for (auto &person : persons) {
-        auto ret =
-            co_await query.prepare("INSERT INTO test_table (id, name, age, born, email, promise) VALUES (:id, :name, "
-                                   ":age, :born, :email, :promise)");
+        auto ret = co_await query.prepare(
+            "INSERT INTO test_table (id, name, age, born, email, promise, val1, val2) VALUES (:id, :name, "
+            ":age, :born, :email, :promise, :val1, :val2)");
         EXPECT_TRUE(ret.has_value());
         if (!ret.has_value()) {
             co_return;
@@ -78,6 +109,8 @@ ILIAS_NAMESPACE::Task<void> test() {
         query.set("email", person.email);
         query.set("born", person.born);
         query.setView("promise", person.promise);
+        query.set("val1", person.val1);
+        query.set("val2", person.val2);
         auto ret1 = co_await query.execute();
         EXPECT_TRUE(ret1.has_value());
         if (!ret1.has_value()) {
@@ -86,26 +119,34 @@ ILIAS_NAMESPACE::Task<void> test() {
     }
 
     // select * from test_table
-    ret = co_await query.execute("SELECT * FROM test_table");
+    ret1 = co_await query.prepare("SELECT * FROM test_table WHERE id>:id");
+    EXPECT_TRUE(ret1.has_value());
+    if (!ret1.has_value()) {
+        co_return;
+    }
+    query.set("id", 1);
+    ret = co_await query.execute();
     EXPECT_TRUE(ret.has_value());
     if (!ret.has_value()) {
         co_return;
     }
     auto result = std::move(ret.value());
-    ILIAS_INFO("sql-test", "select size {}", query.fieldCount());
+    ILIAS_INFO("sql-test", "select size {}", result->countRows());
     while (co_await result->next()) {
-        auto id      = result->get<int>("id").value_or(-1);
-        auto name    = result->get<std::string>("name").value_or("null");
-        auto age     = result->get<int>("age").value_or(-1);
-        auto born    = result->get<SqlDate>("born").value_or(SqlDate());
-        auto email   = result->get<std::string>("email").value_or("null");
-        auto promise = result->get<std::vector<std::byte>>("promise").value();
-        ILIAS_INFO("sql", "id:{} name:{} age:{} email:{} born:{}", id, name, age, email, born.toString());
+        auto        id      = result->get<int>("id").value_or(-1);
+        auto        name    = result->get<std::string>("name").value_or("null");
+        auto        age     = result->get<int>("age").value_or(-1);
+        auto        born    = result->get<SqlDate>("born").value_or(SqlDate());
+        auto        email   = result->get<std::string>("email").value_or("null");
+        auto        promise = result->get<std::vector<std::byte>>("promise").value();
+        auto        val1    = result->get<char>("val1").value();
+        auto        val2    = result->get<int>("val2").value();
         std::string str;
         for (auto &b : promise) {
-            str += std::to_string(static_cast<int>(b)) + " ";
+            str += std::to_string(static_cast<int>(b)) + ".";
         }
-        ILIAS_INFO("sql", "promise({}):{}", promise.size(), str);
+        ILIAS_INFO("sql", "id:{} name:{} age:{} email:{} born:{} val1:{} val2:{} promise:{}", id, name, age, email,
+                   born.toString(), (int)val1, val2, str);
     }
 
     // co_await mysql.autoCommit(false);

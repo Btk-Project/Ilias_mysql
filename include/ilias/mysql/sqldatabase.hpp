@@ -69,6 +69,7 @@ private:
 };
 
 inline SqlDatabase::SqlDatabase() {
+    mMySql = std::make_shared<detail::MySql>();
 }
 
 inline SqlDatabase::SqlDatabase(const SqlDatabase &other)
@@ -108,10 +109,9 @@ inline auto SqlDatabase::open() -> IoTask<void> {
 }
 
 inline auto SqlDatabase::open(std::string_view username, std::string_view password) -> IoTask<void> {
-    if (mMySql.use_count() == 1) {
-        co_await mMySql->disconnect();
+    if (mMySql.use_count() != 1) {
+        mMySql = std::make_shared<detail::MySql>();
     }
-    mMySql    = std::make_shared<detail::MySql>();
     mUserName = std::string(username);
     mPassword = std::string(password);
 
@@ -162,6 +162,7 @@ inline auto SqlDatabase::mysql() -> std::shared_ptr<detail::MySql> {
 template <typename T>
     requires std::is_base_of_v<sqlopt::OptionBase, T>
 auto SqlDatabase::setOption(const T &option) -> SqlError {
+    ILIAS_ASSERT_MSG(mMySql != nullptr, "sql ptr is empty");
     auto ret = mMySql->setOpt(option);
     if (ret != 0) {
         ILIAS_ERROR("sql", "set option error {}", ret);

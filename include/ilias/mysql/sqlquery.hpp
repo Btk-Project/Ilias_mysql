@@ -80,8 +80,6 @@ public:
 
     auto clearBinds() -> void;
 
-    auto fieldCount() -> std::size_t;
-
 private:
     auto pareser(std::string_view query) -> std::string;
 
@@ -117,10 +115,6 @@ inline SqlQuery &SqlQuery::operator=(SqlQuery &&other) noexcept {
     mMysqlStmt       = other.mMysqlStmt;
     other.mMysqlStmt = nullptr;
     return *this;
-}
-
-inline auto SqlQuery::fieldCount() -> std::size_t {
-    return mMysql->fieldCount();
 }
 
 inline auto SqlQuery::execute(std::string_view query) -> IoTask<SqlResult> {
@@ -181,6 +175,7 @@ inline auto SqlQuery::prepare(std::string_view query) -> IoTask<void> {
     }
     int  ret;
     auto queryp = pareser(query);
+    ILIAS_TRACE("sql", "prepare :{}", queryp);
     auto status = mysql_stmt_prepare_start(&ret, mMysqlStmt, queryp.data(), (unsigned long)queryp.size());
     while (status) {
         ILIAS_TRACE("sql", "stmt prepare waiting for status {}", status);
@@ -379,7 +374,19 @@ inline auto SqlQuery::set(int index, SqlDate value) -> SqlError {
     MYSQL_BIND bind;
     memset(&bind, 0, sizeof(bind));
     mBindBuffer[index] = value;
-    bind.buffer_type   = MYSQL_TYPE_DATE;
+    switch (value.time.time_type) {
+        case MYSQL_TIMESTAMP_DATE:
+            bind.buffer_type = MYSQL_TYPE_DATE;
+            break;
+        case MYSQL_TIMESTAMP_DATETIME:
+            bind.buffer_type = MYSQL_TYPE_DATETIME;
+            break;
+        case MYSQL_TIMESTAMP_TIME:
+            bind.buffer_type = MYSQL_TYPE_TIME;
+            break;
+        default:
+            return SqlError::INVALID_PARAMETER;
+    }
     ILIAS_ASSERT(std::get_if<SqlDate>(&mBindBuffer[index]));
     bind.buffer   = std::get_if<SqlDate>(&mBindBuffer[index]);
     mBinds[index] = bind;

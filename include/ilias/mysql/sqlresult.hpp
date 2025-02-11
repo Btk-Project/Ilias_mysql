@@ -116,8 +116,19 @@ auto SqlResultBase::get(std::string_view name) -> Result<T> {
 }
 
 inline auto SqlDate::toString() const -> std::string {
-    return std::to_string(time.year) + "-" + std::to_string(time.month) + "-" + std::to_string(time.day) + " " +
-           std::to_string(time.hour) + ":" + std::to_string(time.minute) + ":" + std::to_string(time.second);
+    if (time.time_type == MYSQL_TIMESTAMP_DATETIME) {
+        return std::to_string(time.year) + "-" + std::to_string(time.month) + "-" + std::to_string(time.day) + " " +
+               std::to_string(time.hour) + ":" + std::to_string(time.minute) + ":" + std::to_string(time.second);
+    }
+    else if (time.time_type == MYSQL_TIMESTAMP_TIME) {
+        return std::to_string(time.hour) + ":" + std::to_string(time.minute) + ":" + std::to_string(time.second);
+    }
+    else if (time.time_type == MYSQL_TIMESTAMP_DATE) {
+        return std::to_string(time.year) + "-" + std::to_string(time.month) + "-" + std::to_string(time.day);
+    }
+    else {
+        return "error time";
+    }
 }
 
 inline auto SqlDate::toTimestamp() const -> uint64_t {
@@ -140,13 +151,19 @@ inline auto SqlDate::setTime(std::chrono::milliseconds timestamp) -> void {
 }
 
 inline auto SqlDate::setTime(int year_, int month_, int day_, int hour_, int minute_, int second_) -> void {
+    if (year_ < 0 || month_ < 0 || month_ > 12 || day_ < 0 || day_ > 31 || hour_ < 0 || hour_ > 23 || minute_ < 0 ||
+        minute_ > 59 || second_ < 0 || second_ > 59) {
+        time.time_type = MYSQL_TIMESTAMP_ERROR;
+        ILIAS_ERROR("sql", "error date time set {}-{}-{} {}:{}:{}", year_, month_, day_, hour_, minute_, second_);
+        return;
+    }
     time.year        = year_;
     time.month       = month_;
     time.day         = day_;
     time.hour        = hour_;
     time.minute      = minute_;
     time.second      = second_;
-    time.time_type   = MYSQL_TIMESTAMP_DATE;
+    time.time_type   = MYSQL_TIMESTAMP_DATETIME;
     time.second_part = 0;
     time.neg         = 0;
 }
@@ -158,7 +175,7 @@ inline auto SqlDate::setTime(struct tm *timeinfo) -> void {
     time.hour        = timeinfo->tm_hour;
     time.minute      = timeinfo->tm_min;
     time.second      = timeinfo->tm_sec;
-    time.time_type   = MYSQL_TIMESTAMP_DATE;
+    time.time_type   = MYSQL_TIMESTAMP_DATETIME;
     time.second_part = 0;
     time.neg         = 0;
 }
