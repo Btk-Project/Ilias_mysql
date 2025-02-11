@@ -1,5 +1,5 @@
 /**
- * @file sqlresult.hpp
+ * @file sqlresultBase.hpp
  * @author llhsdmd (llhsdmd@gmail.com)
  * @brief
  * @version 0.1
@@ -25,122 +25,154 @@
 #include "detail/typehlep.hpp"
 
 ILIAS_SQL_NS_BEGIN
+class SqlQuery;
 
-class SqlResult {
-public:
-    SqlResult(detail::MySql &sql);
-    ~SqlResult();
+struct SqlDate {
+    inline SqlDate(int year = 0, int month = 0, int day = 0, int hour = 0, int minute = 0, int second = 0) {
+        setTime(year, month, day, hour, minute, second);
+    }
+    inline SqlDate(struct tm *timeinfo) { setTime(timeinfo); }
+    inline SqlDate(std::chrono::system_clock::time_point tp) { setTime(tp); }
+    inline SqlDate(std::chrono::milliseconds timestamp) { setTime(timestamp); }
+    inline SqlDate(std::string_view str, std::string_view fmt = "%Y-%m-%d %H:%M:%S") { setTime(str, fmt); }
+    inline SqlDate(const MYSQL_TIME &time) { this->time = time; };
 
-    [[nodiscard("Don't forget to use co_await")]]
-    auto next() -> IoTask<void>;
-    template <typename T>
-    [[nodiscard("Don't forget to use co_await")]]
-    auto get(size_t index) -> IoTask<T>;
-    template <typename T>
-    [[nodiscard("Don't forget to use co_await")]]
-    auto get(const std::string &name) -> IoTask<T>;
-    auto countRows() -> size_t;
+    auto setTime(std::chrono::system_clock::time_point tp) -> void;
+    auto setTime(std::chrono::milliseconds timestamp) -> void;
+    auto setTime(int year, int month, int day, int hour, int minute, int second) -> void;
+    auto setTime(struct tm *timeinfo) -> void;
+    auto setTime(std::string_view str, std::string_view fmt = "%Y-%m-%d %H:%M:%S") -> void;
 
-private:
-    [[nodiscard("Don't forget to use co_await")]]
-    auto fetchRow() -> IoTask<MYSQL_ROW>;
-    auto freeResult() -> void;
+    auto toString() const -> std::string;
+    auto toTimestamp() const -> uint64_t;
 
-private:
-    detail::MySql &mSql;
-    MYSQL_RES     *mResult     = nullptr;
-    MYSQL_ROW      mCurrentRow = nullptr;
-    MYSQL_FIELD   *mFieldMetas = nullptr;
+    SqlDate operator=(const MYSQL_TIME &time) {
+        this->time = time;
+        return *this;
+    }
+
+    operator MYSQL_TIME() const { return time; }
+
+    MYSQL_TIME time = {};
 };
 
-inline SqlResult::SqlResult(detail::MySql &sql) : mSql(sql) {
-}
+using SqlArrayBuffer = std::vector<std::byte>;
+using SqlResultType =
+    std::variant<nullptr_t, char, int32_t, int64_t, double, float, std::string, SqlDate, SqlArrayBuffer>;
 
-inline SqlResult::~SqlResult() {
-    if (mResult) {
-        freeResult();
-    }
-}
+class SqlResultBase {
+public:
+    SqlResultBase()                            = default;
+    SqlResultBase(SqlResultBase &&)            = default;
+    SqlResultBase &operator=(SqlResultBase &&) = default;
+    ~SqlResultBase()                           = default;
 
-inline auto SqlResult::next() -> IoTask<void> {
-    if (mResult == nullptr) {
-        co_return co_await (mSql.storeResult(&mResult) | ignoreCancellation);
+    SqlResultBase(const SqlResultBase &)            = delete;
+    SqlResultBase &operator=(const SqlResultBase &) = delete;
+
+    [[nodiscard("Don't forget to use co_await")]]
+    virtual auto next() -> IoTask<void> = 0;
+    virtual auto countRows() -> size_t  = 0;
+    template <typename T>
+    auto get(size_t index) -> Result<T>;
+    template <typename T>
+    auto get(std::string_view name) -> Result<T>;
+
+protected:
+    virtual auto get(size_t index) -> Result<SqlResultType>          = 0;
+    virtual auto get(std::string_view name) -> Result<SqlResultType> = 0;
+};
+
+using SqlResult = std::unique_ptr<SqlResultBase>;
+
+template <typename T>
+auto SqlResultBase::get(size_t index) -> Result<T> {
+    auto val = get(index);
+    if (!val) {
+        ILIAS_TRACE("sql", "no column value: {}", index);
+        return Unexpected<Error>(val.error());
     }
-    else {
-        mCurrentRow = mysql_fetch_row(mResult);
-        if (mCurrentRow) {
-            co_return {};
-        }
-        else {
-            co_return Unexpected<Error>(SqlError::Code::NO_MORE_DATA);
-        }
+    auto res = std::get_if<T>(&val.value());
+    if (res == nullptr) {
+        ILIAS_TRACE("sql", "Wrong type of column value: {}", index);
+        return Unexpected<Error>(SqlError::WRONG_TYPE_COLUMN_VALUE_ERROR);
     }
+    return *res;
 }
 
 template <typename T>
-inline auto SqlResult::get(size_t index) -> IoTask<T> {
-    if (mCurrentRow == nullptr) {
-        co_return Unexpected<Error>(SqlError::Code::NO_MORE_DATA);
+auto SqlResultBase::get(std::string_view name) -> Result<T> {
+    auto val = get(name);
+    if (!val) {
+        ILIAS_TRACE("sql", "no column value: {}", name);
+        return Unexpected<Error>(val.error());
     }
-    if (index < 0 || index >= mysql_num_rows(mResult)) {
-        co_return Unexpected<Error>(SqlError::Code::INVALID_INDEX);
+    auto res = std::get_if<T>(&val.value());
+    if (res == nullptr) {
+        ILIAS_TRACE("sql", "Wrong type of column value: {}", name);
+        return Unexpected<Error>(SqlError::WRONG_TYPE_COLUMN_VALUE_ERROR);
     }
-    // TODO: try catch ?
-    // co_return detail::fromeString<T>(mCurrentRow[index]);
+    return *res;
 }
 
-// TODO: optimize
-template <typename T>
-inline auto SqlResult::get(const std::string &name) -> IoTask<T> {
-    if (mResult == nullptr || mCurrentRow == nullptr) {
-        co_return Unexpected<Error>(SqlError::Code::NO_MORE_DATA);
-    }
-    if (mFieldMetas == nullptr) {
-        mFieldMetas = mysql_fetch_fields(mResult);
-    }
-    if (mFieldMetas == nullptr) {
-        co_return Unexpected<Error>(SqlError::Code::NO_MORE_DATA);
-    }
-    auto index = -1;
-    for (size_t i = 0; i < mysql_num_fields(mResult); ++i) {
-        if (mFieldMetas[i].name == name) {
-            index = i;
-            break;
-        }
-    }
-    if (index == -1) {
-        co_return Unexpected<Error>(SqlError::Code::INVALID_INDEX);
-    }
-    co_return co_await get<T>(index);
+inline auto SqlDate::toString() const -> std::string {
+    return std::to_string(time.year) + "-" + std::to_string(time.month) + "-" + std::to_string(time.day) + " " +
+           std::to_string(time.hour) + ":" + std::to_string(time.minute) + ":" + std::to_string(time.second);
 }
 
-inline auto SqlResult::countRows() -> size_t {
-    return mysql_num_rows(mResult);
+inline auto SqlDate::toTimestamp() const -> uint64_t {
+    return time.year * 31536000 + time.month * 2592000 + time.day * 86400 + time.hour * 3600 + time.minute * 60 +
+           time.second;
 }
 
-inline auto SqlResult::fetchRow() -> IoTask<MYSQL_ROW> {
-    ILIAS_ASSERT(mResult != nullptr);
-    MYSQL_ROW row;
-    auto      status = mysql_fetch_row_start(&row, mResult);
-    if (status) {
-        while (status) {
-            ILIAS_TRACE("sql", "disconnect mysql waiting for status {}", status);
-            auto pret = co_await mSql.pollStatus(status);
-            status    = mysql_fetch_row_cont(&row, mResult, status);
-            if (!pret) {
-                co_return Unexpected<Error>(pret.error());
-            }
-        }
-    }
-    co_return {};
+inline auto SqlDate::setTime(std::chrono::system_clock::time_point tp) -> void {
+    auto     tt  = std::chrono::system_clock::to_time_t(tp);
+    std::tm *now = gmtime(&tt);
+    setTime(now);
 }
 
-inline auto SqlResult::freeResult() -> void {
-    if (mResult != nullptr) {
-        mysql_free_result(mResult);
-        mResult     = nullptr;
-        mCurrentRow = nullptr;
-        mFieldMetas = nullptr;
+inline auto SqlDate::setTime(std::chrono::milliseconds timestamp) -> void {
+    auto     milliseconds = std::chrono::milliseconds(timestamp);
+    auto     tp           = std::chrono::time_point<std::chrono::system_clock, std::chrono::milliseconds>(milliseconds);
+    auto     tt           = std::chrono::system_clock::to_time_t(tp);
+    std::tm *now          = gmtime(&tt);
+    setTime(now);
+}
+
+inline auto SqlDate::setTime(int year_, int month_, int day_, int hour_, int minute_, int second_) -> void {
+    time.year        = year_;
+    time.month       = month_;
+    time.day         = day_;
+    time.hour        = hour_;
+    time.minute      = minute_;
+    time.second      = second_;
+    time.time_type   = MYSQL_TIMESTAMP_DATE;
+    time.second_part = 0;
+    time.neg         = 0;
+}
+
+inline auto SqlDate::setTime(struct tm *timeinfo) -> void {
+    time.year        = timeinfo->tm_year;
+    time.month       = timeinfo->tm_mon;
+    time.day         = timeinfo->tm_mday;
+    time.hour        = timeinfo->tm_hour;
+    time.minute      = timeinfo->tm_min;
+    time.second      = timeinfo->tm_sec;
+    time.time_type   = MYSQL_TIMESTAMP_DATE;
+    time.second_part = 0;
+    time.neg         = 0;
+}
+
+inline auto SqlDate::setTime(std::string_view str, std::string_view fmt) -> void {
+    if (fmt == "") {
+        fmt = "%Y-%m-%d %H:%M:%S";
     }
+    struct tm timeinfo;
+    memset(&timeinfo, 0, sizeof(struct tm));
+    std::istringstream istr((std::string(str)));
+    istr >> std::get_time(&timeinfo, std::string(fmt).c_str());
+    timeinfo.tm_year += 1900;
+    timeinfo.tm_mon += 1;
+    setTime(&timeinfo);
 }
 ILIAS_SQL_NS_END

@@ -1302,6 +1302,7 @@ public:
     auto message() const -> std::string;
     auto category() const -> const ErrorCategory &;
     auto toString() const -> std::string;
+    auto error() const -> Code;
     auto operator=(const SqlError &) -> SqlError & = default;
 
 private:
@@ -1336,6 +1337,11 @@ inline auto SqlError::isOk() const -> bool {
 inline auto SqlError::value() const -> int64_t {
     return mErr;
 }
+
+inline auto SqlError::error() const -> Code {
+    return (Code)mErr;
+}
+
 inline auto SqlError::message() const -> std::string {
     if (mMessage != "") {
         return mMessage;

@@ -21,24 +21,12 @@
 
 #include "detail/global.hpp"
 #include "detail/mysql.hpp"
+#include "detail/sqlresultp.hpp"
 #include "detail/typehlep.hpp"
 #include "sqldatabase.hpp"
+#include "sqlresult.hpp"
 
 ILIAS_SQL_NS_BEGIN
-
-struct SqlDate : public MYSQL_TIME {
-    inline SqlDate(int year = 0, int month = 0, int day = 0, int hour = 0, int minute = 0, int second = 0) {
-        setTime(year, month, day, hour, minute, second);
-    }
-    inline SqlDate(struct tm *timeinfo) { setTime(timeinfo); }
-    inline SqlDate(std::chrono::system_clock::time_point tp) { setTime(tp); }
-    inline SqlDate(std::chrono::milliseconds timestamp) { setTime(timestamp); }
-
-    auto setTime(std::chrono::system_clock::time_point tp) -> void;
-    auto setTime(std::chrono::milliseconds timestamp) -> void;
-    auto setTime(int year, int month, int day, int hour, int minute, int second) -> void;
-    auto setTime(struct tm *timeinfo) -> void;
-};
 
 class SqlQuery {
 public:
@@ -52,47 +40,47 @@ public:
     SqlQuery &operator=(const SqlQuery &) = delete;
 
     [[nodiscard("Don't forget to use co_await")]]
-    auto execute(std::string_view query) -> IoTask<void>;
+    auto execute(std::string_view query) -> IoTask<SqlResult>;
 
     [[nodiscard("Don't forget to use co_await")]]
     auto prepare(std::string_view query) -> IoTask<void>;
     [[nodiscard("Don't forget to use co_await")]]
-    auto execute() -> IoTask<void>;
-    ///> bind TINYINT
-    auto bind(int index, signed char value) -> SqlError;
-    ///> bind SMALLINT
-    auto bind(int index, short int value) -> SqlError;
-    ///> bind INT
-    auto bind(int index, int value) -> SqlError;
-    ///> bind BIGINT / LONGLONG
-    auto bind(int index, long long int value) -> SqlError;
-    ///> bind FLOAT
-    auto bind(int index, float value) -> SqlError;
-    ///> bind DOUBLE
-    auto bind(int index, double value) -> SqlError;
-    ///> bind TEXT, CHAR, VARCHAR
-    auto bind(int index, const std::string &value) -> SqlError;
-    ///> bind TIME, DATE, DATETIME, TIMESTAMP
-    auto bind(int index, SqlDate value) -> SqlError;
-    ///> bind TEXT, CHAR, VARCHAR
-    auto bind(int index, const std::u8string &value) -> SqlError;
-    ///> bind value
-    template <detail::BindAble<SqlQuery> T>
-    auto bind(const std::string &name, const T &value) -> SqlError;
+    auto execute() -> IoTask<SqlResult>;
+    ///> set TINYINT
+    auto set(int index, signed char value) -> SqlError;
+    ///> set SMALLINT
+    auto set(int index, short int value) -> SqlError;
+    ///> set INT
+    auto set(int index, int value) -> SqlError;
+    ///> set BIGINT / LONGLONG
+    auto set(int index, long long int value) -> SqlError;
+    ///> set FLOAT
+    auto set(int index, float value) -> SqlError;
+    ///> set DOUBLE
+    auto set(int index, double value) -> SqlError;
+    ///> set TEXT, CHAR, VARCHAR
+    auto set(int index, const std::string &value) -> SqlError;
+    ///> set TIME, DATE, DATETIME, TIMESTAMP
+    auto set(int index, SqlDate value) -> SqlError;
+    ///> set TEXT, CHAR, VARCHAR
+    auto set(int index, const std::u8string &value) -> SqlError;
+    ///> set value
+    template <detail::SetAble<SqlQuery> T>
+    auto set(const std::string &name, const T &value) -> SqlError;
 
-    ///> bind TEXT, CHAR, VARCHAR, this api will not copy, Please ensure that the data is valid during execute.
-    auto bindView(int index, std::string_view value) -> SqlError;
-    ///> bind TEXT, CHAR, VARCHAR, this api will not copy, Please ensure that the data is valid during execute.
-    auto bindView(int index, const std::u8string_view &value) -> SqlError;
-    ///> bind BLOB, BINARY, VARBINARY, this api will not copy, Please ensure that the data is voalid during execute.
-    auto bindView(int index, std::span<const std::byte> value) -> SqlError;
-    ///> bind valueViwe, this api will not copy, Please ensure that the data is voalid during execute.
-    template <detail::BindViewAble<SqlQuery> T>
-    auto bindView(const std::string &name, T value) -> SqlError;
+    ///> set TEXT, CHAR, VARCHAR, this api will not copy, Please ensure that the data is valid during execute.
+    auto setView(int index, std::string_view value) -> SqlError;
+    ///> set TEXT, CHAR, VARCHAR, this api will not copy, Please ensure that the data is valid during execute.
+    auto setView(int index, const std::u8string_view &value) -> SqlError;
+    ///> set BLOB, BINARY, VARBINARY, this api will not copy, Please ensure that the data is voalid during execute.
+    auto setView(int index, std::span<const std::byte> value) -> SqlError;
+    ///> set valueViwe, this api will not copy, Please ensure that the data is voalid during execute.
+    template <detail::SetViewAble<SqlQuery> T>
+    auto setView(const std::string &name, T value) -> SqlError;
 
-    [[nodiscard("Don't forget to use co_await")]]
-    auto close() -> IoTask<void>;
     auto clearBinds() -> void;
+
+    auto fieldCount() -> std::size_t;
 
 private:
     auto pareser(std::string_view query) -> std::string;
@@ -131,9 +119,23 @@ inline SqlQuery &SqlQuery::operator=(SqlQuery &&other) noexcept {
     return *this;
 }
 
-inline auto SqlQuery::execute(std::string_view query) -> IoTask<void> {
+inline auto SqlQuery::fieldCount() -> std::size_t {
+    return mMysql->fieldCount();
+}
+
+inline auto SqlQuery::execute(std::string_view query) -> IoTask<SqlResult> {
     ILIAS_ASSERT(mMysql != nullptr);
-    co_return co_await (mMysql->query(query) | ignoreCancellation);
+    ILIAS_TRACE("sql", "exec query {}", query);
+    auto ret = co_await (mMysql->query(query) | ignoreCancellation);
+    if (!ret) {
+        co_return Unexpected<Error>(ret.error());
+    }
+    auto sqlResult = std::make_unique<detail::SqlQueryResult>(mMysql);
+    auto ret1      = co_await sqlResult->getResult();
+    if (!ret1) {
+        co_return Unexpected<Error>(ret1.error());
+    }
+    co_return sqlResult;
 }
 
 // this query should like "SELECT * FROM table WHERE name=:name,age=:age;"
@@ -146,6 +148,9 @@ inline auto SqlQuery::pareser(std::string_view query) -> std::string {
     auto        start = query.find_first_of(':');
     if (start != std::string::npos) {
         ret = query.substr(0, start);
+    }
+    else {
+        return std::string(query);
     }
     auto end = start;
     while (start != std::string::npos) {
@@ -186,31 +191,31 @@ inline auto SqlQuery::prepare(std::string_view query) -> IoTask<void> {
         status = mysql_stmt_prepare_cont(&ret, mMysqlStmt, status);
     }
     if (ret != 0) {
-        ILIAS_ERROR("sql", "stmt failed, error: {}", ret);
+        ILIAS_ERROR("sql", "stmt failed, error: {}", mMysql->lastErrorMessage());
         co_return Unexpected<Error>((SqlError::Code)ret);
     }
     co_return {};
 }
 
-template <detail::BindAble<SqlQuery> T>
-inline auto SqlQuery::bind(const std::string &name, const T &value) -> SqlError {
+template <detail::SetAble<SqlQuery> T>
+inline auto SqlQuery::set(const std::string &name, const T &value) -> SqlError {
     auto index = mIndexs.find(name);
     if (index == mIndexs.end()) {
         return SqlError::INVALID_INDEX;
     }
-    return bind(index->second, value);
+    return set(index->second, value);
 }
 
-template <detail::BindViewAble<SqlQuery> T>
-inline auto SqlQuery::bindView(const std::string &name, T value) -> SqlError {
+template <detail::SetViewAble<SqlQuery> T>
+inline auto SqlQuery::setView(const std::string &name, T value) -> SqlError {
     auto index = mIndexs.find(name);
     if (index == mIndexs.end()) {
         return SqlError::INVALID_INDEX;
     }
-    return bindView(index->second, value);
+    return setView(index->second, value);
 }
 
-inline auto SqlQuery::bindView(int index, std::string_view value) -> SqlError {
+inline auto SqlQuery::setView(int index, std::string_view value) -> SqlError {
     if (mMysqlStmt == nullptr) {
         return SqlError::NOT_PREPARED;
     }
@@ -226,7 +231,7 @@ inline auto SqlQuery::bindView(int index, std::string_view value) -> SqlError {
     return SqlError::OK;
 }
 
-inline auto SqlQuery::bind(int index, const std::string &value) -> SqlError {
+inline auto SqlQuery::set(int index, const std::string &value) -> SqlError {
     if (mMysqlStmt == nullptr) {
         return SqlError::NOT_PREPARED;
     }
@@ -244,7 +249,7 @@ inline auto SqlQuery::bind(int index, const std::string &value) -> SqlError {
     return SqlError::OK;
 }
 
-inline auto SqlQuery::bind(int index, const std::u8string &value) -> SqlError {
+inline auto SqlQuery::set(int index, const std::u8string &value) -> SqlError {
     if (mMysqlStmt == nullptr) {
         return SqlError::NOT_PREPARED;
     }
@@ -262,7 +267,7 @@ inline auto SqlQuery::bind(int index, const std::u8string &value) -> SqlError {
     return SqlError::OK;
 }
 
-inline auto SqlQuery::bind(int index, signed char value) -> SqlError {
+inline auto SqlQuery::set(int index, signed char value) -> SqlError {
     if (mMysqlStmt == nullptr) {
         return SqlError::NOT_PREPARED;
     }
@@ -279,7 +284,7 @@ inline auto SqlQuery::bind(int index, signed char value) -> SqlError {
     return SqlError::OK;
 }
 
-inline auto SqlQuery::bind(int index, short int value) -> SqlError {
+inline auto SqlQuery::set(int index, short int value) -> SqlError {
     if (mMysqlStmt == nullptr) {
         return SqlError::NOT_PREPARED;
     }
@@ -296,7 +301,7 @@ inline auto SqlQuery::bind(int index, short int value) -> SqlError {
     return SqlError::OK;
 }
 
-inline auto SqlQuery::bind(int index, int value) -> SqlError {
+inline auto SqlQuery::set(int index, int value) -> SqlError {
     if (mMysqlStmt == nullptr) {
         return SqlError::NOT_PREPARED;
     }
@@ -313,7 +318,7 @@ inline auto SqlQuery::bind(int index, int value) -> SqlError {
     return SqlError::OK;
 }
 
-inline auto SqlQuery::bind(int index, long long int value) -> SqlError {
+inline auto SqlQuery::set(int index, long long int value) -> SqlError {
     if (mMysqlStmt == nullptr) {
         return SqlError::NOT_PREPARED;
     }
@@ -330,7 +335,7 @@ inline auto SqlQuery::bind(int index, long long int value) -> SqlError {
     return SqlError::OK;
 }
 
-inline auto SqlQuery::bind(int index, float value) -> SqlError {
+inline auto SqlQuery::set(int index, float value) -> SqlError {
     if (mMysqlStmt == nullptr) {
         return SqlError::NOT_PREPARED;
     }
@@ -347,7 +352,7 @@ inline auto SqlQuery::bind(int index, float value) -> SqlError {
     return SqlError::OK;
 }
 
-inline auto SqlQuery::bind(int index, double value) -> SqlError {
+inline auto SqlQuery::set(int index, double value) -> SqlError {
     if (mMysqlStmt == nullptr) {
         return SqlError::NOT_PREPARED;
     }
@@ -364,7 +369,7 @@ inline auto SqlQuery::bind(int index, double value) -> SqlError {
     return SqlError::OK;
 }
 
-inline auto SqlQuery::bind(int index, SqlDate value) -> SqlError {
+inline auto SqlQuery::set(int index, SqlDate value) -> SqlError {
     if (mMysqlStmt == nullptr) {
         return SqlError::NOT_PREPARED;
     }
@@ -381,7 +386,7 @@ inline auto SqlQuery::bind(int index, SqlDate value) -> SqlError {
     return SqlError::OK;
 }
 
-inline auto SqlQuery::bindView(int index, const std::u8string_view &value) -> SqlError {
+inline auto SqlQuery::setView(int index, const std::u8string_view &value) -> SqlError {
     if (mMysqlStmt == nullptr) {
         return SqlError::NOT_PREPARED;
     }
@@ -397,7 +402,7 @@ inline auto SqlQuery::bindView(int index, const std::u8string_view &value) -> Sq
     return SqlError::OK;
 }
 
-inline auto SqlQuery::bindView(int index, std::span<const std::byte> value) -> SqlError {
+inline auto SqlQuery::setView(int index, std::span<const std::byte> value) -> SqlError {
     if (mMysqlStmt == nullptr) {
         return SqlError::NOT_PREPARED;
     }
@@ -413,33 +418,18 @@ inline auto SqlQuery::bindView(int index, std::span<const std::byte> value) -> S
     return SqlError::OK;
 }
 
-inline auto SqlQuery::close() -> IoTask<void> {
-    my_bool ret;
-    auto    status = mysql_stmt_close_start(&ret, mMysqlStmt);
-    while (status) {
-        ILIAS_TRACE("sql", "stmt close waiting for status {}", status);
-        auto pret = co_await (mMysql->pollStatus(status) | ignoreCancellation);
-        if (!pret) {
-            mMysqlStmt = nullptr;
-            ILIAS_TRACE("sql", "stmt close waiting for status {}", status);
-            co_return Unexpected<Error>(pret.error());
-        }
-        status = mysql_stmt_close_cont(&ret, mMysqlStmt, status);
-    }
-    mMysqlStmt = nullptr;
-    if (!ret) {
-        ILIAS_ERROR("sql", "stmt close failed. (error {}:{})", ret, mMysql->lastErrorMessage());
-        co_return Unexpected<Error>(Error::Unknown);
-    }
-    co_return {};
-}
-
-inline auto SqlQuery::execute() -> IoTask<void> {
+inline auto SqlQuery::execute() -> IoTask<SqlResult> {
     if (mMysqlStmt == nullptr) {
         co_return Unexpected<Error>(SqlError::Code::NOT_PREPARED);
     }
-    int ret     = 0;
-    ret         = mysql_stmt_bind_param(mMysqlStmt, mBinds.data());
+    int ret = 0;
+    if (mBinds.size() > 0) {
+        ret = mysql_stmt_bind_param(mMysqlStmt, mBinds.data());
+    }
+    if (ret != 0) {
+        ILIAS_ERROR("sql", "stmt bind failed. (error {}:{})", ret, mMysql->lastErrorMessage());
+        co_return Unexpected<Error>((SqlError::Code)ret);
+    }
     auto status = mysql_stmt_execute_start(&ret, mMysqlStmt);
     while (status) {
         ILIAS_TRACE("sql", "stmt execute waiting for status {}", status);
@@ -454,7 +444,14 @@ inline auto SqlQuery::execute() -> IoTask<void> {
         ILIAS_ERROR("sql", "stmt execute failed. (error {}:{})", ret, mMysql->lastErrorMessage());
         co_return Unexpected<Error>((SqlError::Code)ret);
     }
-    co_return {};
+    auto sqlResult = std::make_unique<detail::SqlStmtResult>(mMysql, mMysqlStmt);
+    auto ret1      = co_await sqlResult->getResult();
+    clearBinds();
+    mMysqlStmt = nullptr;
+    if (!ret1) {
+        co_return Unexpected<Error>(ret1.error());
+    }
+    co_return sqlResult;
 }
 
 inline auto SqlQuery::clearBinds() -> void {
@@ -462,44 +459,6 @@ inline auto SqlQuery::clearBinds() -> void {
     for (int i = 0; i < (int)mBinds.size(); ++i) {
         mBinds[i].buffer_type = MYSQL_TYPE_NULL;
     }
-}
-
-inline auto SqlDate::setTime(std::chrono::system_clock::time_point tp) -> void {
-    auto     tt  = std::chrono::system_clock::to_time_t(tp);
-    std::tm *now = gmtime(&tt);
-    setTime(now);
-}
-
-inline auto SqlDate::setTime(std::chrono::milliseconds timestamp) -> void {
-    auto     milliseconds = std::chrono::milliseconds(timestamp);
-    auto     tp           = std::chrono::time_point<std::chrono::system_clock, std::chrono::milliseconds>(milliseconds);
-    auto     tt           = std::chrono::system_clock::to_time_t(tp);
-    std::tm *now          = gmtime(&tt);
-    setTime(now);
-}
-
-inline auto SqlDate::setTime(int year_, int month_, int day_, int hour_, int minute_, int second_) -> void {
-    year        = year_;
-    month       = month_;
-    day         = day_;
-    hour        = hour_;
-    minute      = minute_;
-    second      = second_;
-    time_type   = MYSQL_TIMESTAMP_DATE;
-    second_part = 0;
-    neg         = 0;
-}
-
-inline auto SqlDate::setTime(struct tm *timeinfo) -> void {
-    year        = timeinfo->tm_year;
-    month       = timeinfo->tm_mon;
-    day         = timeinfo->tm_mday;
-    hour        = timeinfo->tm_hour;
-    minute      = timeinfo->tm_min;
-    second      = timeinfo->tm_sec;
-    time_type   = MYSQL_TIMESTAMP_DATE;
-    second_part = 0;
-    neg         = 0;
 }
 
 ILIAS_SQL_NS_END

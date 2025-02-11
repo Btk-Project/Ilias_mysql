@@ -98,6 +98,7 @@ public:
     // store result might use too much memory in retrieving a large result set all at once.
     [[nodiscard("Don't forget to use co_await")]]
     auto storeResult(MYSQL_RES **result) -> IoTask<void>;
+    auto fieldCount() -> std::size_t;
 
     // shutdown
     [[nodiscard("Don't forget to use co_await")]]
@@ -167,18 +168,32 @@ inline auto MySql::pollStatus(int &status, uint32_t pollEvents) -> IoTask<void> 
         }
     }
     ILIAS_TRACE("sql", "poll events: {}", events);
+    Result<unsigned int> ret;
     if (timeOut == 0) {
-        auto pret = co_await mPoller.poll(pollEvents);
-        if (!pret) {
-            ILIAS_ERROR("sql", "poll failed, {}", pret.error().message());
-            co_return Unexpected<Error>(pret.error());
+        auto ret = co_await mPoller.poll(pollEvents);
+        if (!ret) {
+            ILIAS_ERROR("sql", "poll failed, {}", ret.error().message());
+            co_return Unexpected<Error>(ret.error());
         }
-        co_return {};
     }
-    auto pret = co_await (mPoller.poll(pollEvents) | setTimeout(std::chrono::milliseconds(timeOut)));
-    if (!pret) {
-        ILIAS_ERROR("sql", "poll failed, no result in poll.");
-        co_return Unexpected<Error>(pret.error());
+    else {
+        auto ret = co_await (mPoller.poll(pollEvents) | setTimeout(std::chrono::milliseconds(timeOut)));
+        if (!ret) {
+            ILIAS_ERROR("sql", "poll failed, no result in poll.");
+            co_return Unexpected<Error>(ret.error());
+        }
+    }
+    if (status & MYSQL_WAIT_TIMEOUT) {
+        status = MYSQL_WAIT_TIMEOUT;
+    }
+    if (ret.value_or(0) & POLLIN) {
+        status |= MYSQL_WAIT_READ;
+    }
+    if (ret.value_or(0) | POLLOUT) {
+        status |= MYSQL_WAIT_WRITE;
+    }
+    if (ret.value_or(0) | POLLPRI) {
+        status |= MYSQL_WAIT_EXCEPT;
     }
     co_return {};
 }
@@ -236,9 +251,11 @@ inline auto MySql::pollStatus(int &status, uint32_t pollEvents) -> IoTask<void> 
         return false;                                                                                                  \
     };                                                                                                                 \
     if (!_check(OutP)) {                                                                                               \
-        auto error = mysql_error(&mMysql);                                                                             \
-        ILIAS_ERROR("sql", "{} failed, error: {}", #MysqlFunc, error);                                                 \
-        co_return Unexpected<Error>(SqlError::Code(mysql_errno(&mMysql)));                                             \
+        auto error   = mysql_error(&mMysql);                                                                           \
+        auto errCode = mysql_errno(&mMysql);                                                                           \
+        if (errCode != 0)                                                                                              \
+            ILIAS_ERROR("sql", "{} failed, error({}): {}", #MysqlFunc, errCode, error);                                \
+        co_return Unexpected<Error>(SqlError::Code(errCode));                                                          \
     }
 
 inline auto MySql::connect(std::string_view host, std::string_view user, std::string_view passwd, std::string_view db,
@@ -355,6 +372,14 @@ inline auto MySql::nextResult() -> IoTask<void> {
     int ret;
     SQL_PRIVATE_SYNC_CODE(ret, mysql_next_result)
     co_return {};
+}
+
+inline auto MySql::fieldCount() -> std::size_t {
+    return mysql_field_count(&mMysql);
+}
+
+inline auto MySql::useResult() -> IoTask<MYSQL_RES *> {
+    co_return mysql_use_result(&mMysql);
 }
 
 inline auto MySql::storeResult(MYSQL_RES **result) -> IoTask<void> {

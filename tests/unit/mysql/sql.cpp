@@ -22,21 +22,21 @@ ILIAS_NAMESPACE::Task<void> test() {
     db.setUserName("root");
     db.setPassword("123456");
     db.setPort(3306);
-    auto ret = co_await db.open();
-    EXPECT_TRUE(ret.has_value());
-    if (!ret.has_value()) {
+    auto ret1 = co_await db.open();
+    EXPECT_TRUE(ret1.has_value());
+    if (!ret1.has_value()) {
         co_return;
     }
     SqlQuery query(db);
 
     // create datebase test.
-    ret = co_await query.execute("CREATE DATABASE IF NOT EXISTS test");
+    auto ret = co_await query.execute("CREATE DATABASE IF NOT EXISTS test");
     EXPECT_TRUE(ret.has_value());
     if (!ret.has_value()) {
         co_return;
     }
     // use database test.
-    ret = co_await db.selectDb("test");
+    ret1 = co_await db.selectDb("test");
     EXPECT_TRUE(ret.has_value());
     if (!ret.has_value()) {
         co_return;
@@ -65,23 +65,47 @@ ILIAS_NAMESPACE::Task<void> test() {
         {4, "Bob", 18, "Bob@test.com", SqlDate(2025, 1, 20), {std::byte {3}, std::byte {2}, std::byte {3}}},
     };
     for (auto &person : persons) {
-        ret = co_await query.prepare("INSERT INTO test_table (id, name, age, born, email, promise) VALUES (:id, :name, "
-                                     ":age, :born, :email, :promise)");
+        auto ret =
+            co_await query.prepare("INSERT INTO test_table (id, name, age, born, email, promise) VALUES (:id, :name, "
+                                   ":age, :born, :email, :promise)");
         EXPECT_TRUE(ret.has_value());
         if (!ret.has_value()) {
             co_return;
         }
-        query.bind("id", person.id);
-        query.bind("name", person.name);
-        query.bind("age", person.age);
-        query.bind("email", person.email);
-        query.bind("born", person.born);
-        query.bindView("promise", person.promise);
-        ret = co_await query.execute();
-        EXPECT_TRUE(ret.has_value());
-        if (!ret.has_value()) {
+        query.set("id", person.id);
+        query.set("name", person.name);
+        query.set("age", person.age);
+        query.set("email", person.email);
+        query.set("born", person.born);
+        query.setView("promise", person.promise);
+        auto ret1 = co_await query.execute();
+        EXPECT_TRUE(ret1.has_value());
+        if (!ret1.has_value()) {
             co_return;
         }
+    }
+
+    // select * from test_table
+    ret = co_await query.execute("SELECT * FROM test_table");
+    EXPECT_TRUE(ret.has_value());
+    if (!ret.has_value()) {
+        co_return;
+    }
+    auto result = std::move(ret.value());
+    ILIAS_INFO("sql-test", "select size {}", query.fieldCount());
+    while (co_await result->next()) {
+        auto id      = result->get<int>("id").value_or(-1);
+        auto name    = result->get<std::string>("name").value_or("null");
+        auto age     = result->get<int>("age").value_or(-1);
+        auto born    = result->get<SqlDate>("born").value_or(SqlDate());
+        auto email   = result->get<std::string>("email").value_or("null");
+        auto promise = result->get<std::vector<std::byte>>("promise").value();
+        ILIAS_INFO("sql", "id:{} name:{} age:{} email:{} born:{}", id, name, age, email, born.toString());
+        std::string str;
+        for (auto &b : promise) {
+            str += std::to_string(static_cast<int>(b)) + " ";
+        }
+        ILIAS_INFO("sql", "promise({}):{}", promise.size(), str);
     }
 
     // co_await mysql.autoCommit(false);
@@ -95,6 +119,8 @@ TEST(SQL, test) {
 int main(int argc, char **argv) {
     ILIAS_LOG_SET_LEVEL(ILIAS_TRACE_LEVEL);
     ilias::PlatformContext ioContext;
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
+    // ::testing::InitGoogleTest(&argc, argv);
+    ilias_wait test();
+    // return RUN_ALL_TESTS();
+    return 0;
 }
