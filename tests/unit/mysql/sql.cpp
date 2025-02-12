@@ -24,7 +24,11 @@ ILIAS_NAMESPACE::Task<void> test() {
     db.setUserName("root");
     db.setPassword("123456");
     db.setPort(3306);
-    db.setOption(sqlopt::InitCommand("SET NAMES 'utf8mb4'"));
+    auto initCommand = sqlopt::InitCommand("SET NAMES 'utf8mb4'");
+    db.setOption(initCommand);
+    auto connectTimeout = sqlopt::ConnectTimeout(30);
+    db.setOption(connectTimeout);
+
     auto ret1 = co_await db.open();
     EXPECT_TRUE(ret1.has_value());
     if (!ret1.has_value()) {
@@ -59,8 +63,7 @@ ILIAS_NAMESPACE::Task<void> test() {
     if (!ret.has_value()) {
         co_return;
     }
-    // insert 0001, test, 18, 2000-01-01, test@test.com
-    // insert 0002, 小明, 19, 2001-01-01, xiaoming@test.com
+    // insert data
     std::vector<Person> persons = {
         {1,
          "a test user",
@@ -160,8 +163,7 @@ TEST(SQL, test) {
 int main(int argc, char **argv) {
     ILIAS_LOG_SET_LEVEL(ILIAS_TRACE_LEVEL);
     ilias::PlatformContext ioContext;
-    // ::testing::InitGoogleTest(&argc, argv);
-    ilias_wait test();
-    // return RUN_ALL_TESTS();
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
     return 0;
 }

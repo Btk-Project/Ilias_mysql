@@ -40,6 +40,8 @@ struct SqlDate {
     auto setTime(std::chrono::system_clock::time_point tp) -> void;
     auto setTime(std::chrono::milliseconds timestamp) -> void;
     auto setTime(int year, int month, int day, int hour, int minute, int second) -> void;
+    auto setDate(int year, int month, int day) -> void;
+    auto setTime(int hour, int minute, int second) -> void;
     auto setTime(struct tm *timeinfo) -> void;
     auto setTime(std::string_view str, std::string_view fmt = "%Y-%m-%d %H:%M:%S") -> void;
 
@@ -166,6 +168,32 @@ inline auto SqlDate::setTime(int year_, int month_, int day_, int hour_, int min
     time.time_type   = MYSQL_TIMESTAMP_DATETIME;
     time.second_part = 0;
     time.neg         = 0;
+}
+
+inline auto SqlDate::setDate(int year, int month, int day) -> void {
+    if (year < 0 || month < 0 || month > 12 || day < 0 || day > 31) {
+        time.time_type = MYSQL_TIMESTAMP_ERROR;
+        ILIAS_ERROR("sql", "error date set {}-{}-{}", year, month, day);
+        return;
+    }
+    memset(&time, 0, sizeof(time));
+    time.year      = year;
+    time.month     = month;
+    time.day       = day;
+    time.time_type = MYSQL_TIMESTAMP_DATE;
+}
+
+inline auto SqlDate::setTime(int hour, int minute, int second) -> void {
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+        time.time_type = MYSQL_TIMESTAMP_ERROR;
+        ILIAS_ERROR("sql", "error time set {}:{}:{}", hour, minute, second);
+        return;
+    }
+    memset(&time, 0, sizeof(time));
+    time.hour      = hour;
+    time.minute    = minute;
+    time.second    = second;
+    time.time_type = MYSQL_TIMESTAMP_TIME;
 }
 
 inline auto SqlDate::setTime(struct tm *timeinfo) -> void {

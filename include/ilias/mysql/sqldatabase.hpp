@@ -51,10 +51,15 @@ public:
     template <typename T>
         requires std::is_base_of_v<sqlopt::OptionBase, T>
     auto setOption(const T &option) -> SqlError;
-    auto mysql() -> std::shared_ptr<detail::MySql>;
+    template <typename T>
+        requires std::is_base_of_v<sqlopt::OptionBase, T>
+    auto getOption(T &option) -> SqlError;
 
 private:
+    auto mysql() -> std::shared_ptr<detail::MySql>;
     auto parserOptions() -> void;
+
+    friend class SqlQuery;
 
 private:
     std::string                    mUserName       = "";
@@ -166,6 +171,17 @@ auto SqlDatabase::setOption(const T &option) -> SqlError {
     auto ret = mMySql->setOpt(option);
     if (ret != 0) {
         ILIAS_ERROR("sql", "set option error {}", ret);
+    }
+    return (SqlError::Code)ret;
+}
+
+template <typename T>
+    requires std::is_base_of_v<sqlopt::OptionBase, T>
+auto SqlDatabase::getOption(T &option) -> SqlError {
+    ILIAS_ASSERT_MSG(mMySql != nullptr, "sql ptr is empty");
+    auto ret = mMySql->getOpt(option);
+    if (ret != 0) {
+        ILIAS_ERROR("sql", "get option error {}", ret);
     }
     return (SqlError::Code)ret;
 }

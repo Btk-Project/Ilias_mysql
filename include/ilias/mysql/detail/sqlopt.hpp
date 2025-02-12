@@ -32,10 +32,10 @@ ILIAS_SQL_NS_BEGIN
     MYSQL_OPTION_ROW(SslCipher, MYSQL_OPT_SSL_CIPHER, std::string)                                                     \
     MYSQL_OPTION_ROW(SslCrl, MYSQL_OPT_SSL_CRL, std::string)                                                           \
     MYSQL_OPTION_ROW(SslCrlPath, MYSQL_OPT_SSL_CRLPATH, std::string)                                                   \
-    MYSQL_OPTION_ROW(CanHandleExpiredPasswords, MYSQL_OPT_CAN_HANDLE_EXPIRED_PASSWORDS, int)                           \
+    MYSQL_OPTION_ROW(CanHandleExpiredPasswords, MYSQL_OPT_CAN_HANDLE_EXPIRED_PASSWORDS, bool *)                        \
     MYSQL_OPTION_ROW(SslEnforce, MYSQL_OPT_SSL_ENFORCE, bool *)                                                        \
-    MYSQL_OPTION_ROW(MaxAllowedPacket, MYSQL_OPT_MAX_ALLOWED_PACKET, size_t)                                           \
-    MYSQL_OPTION_ROW(NetBufferLength, MYSQL_OPT_NET_BUFFER_LENGTH, size_t)                                             \
+    MYSQL_OPTION_ROW(MaxAllowedPacket, MYSQL_OPT_MAX_ALLOWED_PACKET, unsigned long *)                                  \
+    MYSQL_OPTION_ROW(NetBufferLength, MYSQL_OPT_NET_BUFFER_LENGTH, unsigned long *)                                    \
     MYSQL_OPTION_ROW(Nonblock, MYSQL_OPT_NONBLOCK, int)                                                                \
     MYSQL_OPTION_ROW(SslFp, MARIADB_OPT_SSL_FP, std::string)                                                           \
     MYSQL_OPTION_ROW(SslFpList, MARIADB_OPT_SSL_FP_LIST, std::string)                                                  \
@@ -55,11 +55,25 @@ ILIAS_SQL_NS_BEGIN
     MYSQL_OPTION_ROW(MultiStatements, MARIADB_OPT_MULTI_STATEMENTS, std::string)
 
 namespace sqlopt {
+namespace detail {
+// 获取枚举字符串名称
+inline static const char *getMySqlOptName(mysql_option opt) {
+    switch (opt) {
+#define MYSQL_OPTION_ROW(_, enum, _1)                                                                                  \
+    case enum:                                                                                                         \
+        return #enum;
+        MYSQL_OPTION_TABLE
+#undef MYSQL_OPTION_ROW
+        default:
+            return "unknown";
+    }
+}
+} // namespace detail
 
 class OptionBase {
 public:
     virtual auto setopt(MYSQL &sql) const -> int = 0;
-    // virtual auto getopt(MYSQL &sql) const -> int = 0;
+    virtual auto getopt(MYSQL &sql) -> int       = 0;
 };
 
 template <mysql_option Optname, typename T, class enable = void>
@@ -68,32 +82,36 @@ public:
     constexpr OptionT() = default;
     constexpr OptionT(T value) : mValue(value) {}
     auto setopt(MYSQL &sql) const -> int override {
-        auto ret = mysql_optionsv(&sql, Optname, mValue);
+        auto ret = mysql_optionsv(&sql, Optname, &mValue);
         if (ret != 0) {
-            ILIAS_ERROR("sql", "option{} set error({})", (int)Optname, ret);
+            ILIAS_ERROR("sql", "option({}) set error({}).", detail::getMySqlOptName(Optname), ret);
+        }
+        else {
+            ILIAS_TRACE("sql", "option({}) set value({}).", detail::getMySqlOptName(Optname), mValue);
         }
         return ret;
     }
-    // auto getopt(MYSQL &sql) const -> int override {
-    //     auto ret = mysql_get_optionv(&sql, Optname, &mValue);
-    //     if (ret != 0) {
-    //         ILIAS_ERROR("sql", "option{} get error({})", Optname, ret);
-    //     }
-    //     return ret;
-    // }
 
+    auto getopt(MYSQL &sql) -> int override {
+        auto ret = mysql_get_optionv(&sql, Optname, &mValue);
+        if (ret != 0) {
+            ILIAS_ERROR("sql", "{} get error({}).", detail::getMySqlOptName(Optname), ret);
+        }
+        return ret;
+    }
+    auto setValue(T value) -> void { mValue = value; }
     /**
      * @brief Get the value of the option
      *
      */
-    constexpr auto value() const noexcept { return mValue; }
+    auto value() const noexcept { return mValue; }
 
     /**
      * @brief Directly get the value of the option
      *
      * @return T
      */
-    constexpr operator T() const noexcept { return mValue; }
+    operator T() const noexcept { return mValue; }
 
 private:
     T mValue {};
@@ -105,20 +123,25 @@ public:
     constexpr OptionT() = default;
     constexpr OptionT(T value) : mValue(value) {}
     auto setopt(MYSQL &sql) const -> int override {
-        auto ret = mysql_optionsv(&sql, Optname, (void *)&mValue);
+        auto ret = mysql_optionsv(&sql, Optname, &mValue);
         if (ret != 0) {
-            ILIAS_ERROR("sql", "option{} set error({})", (int)Optname, ret);
+            ILIAS_ERROR("sql", "option({}) set error({})", detail::getMySqlOptName(Optname), ret);
+        }
+        else {
+            ILIAS_TRACE("sql", "option({}) set value({}).", detail::getMySqlOptName(Optname), mValue);
         }
         return ret;
     }
-    // auto getopt(MYSQL &sql) const -> int override {
-    //     auto ret = mysql_get_optionv(&sql, Optname, (void *)&mValue);
-    //     if (ret != 0) {
-    //         ILIAS_ERROR("sql", "option{} get error({})", Optname, ret);
-    //     }
-    //     return ret;
-    // }
 
+    auto getopt(MYSQL &sql) -> int override {
+        auto ret = mysql_get_optionv(&sql, Optname, &mValue);
+        if (ret != 0) {
+            ILIAS_ERROR("sql", "option({}) get error({}).", detail::getMySqlOptName(Optname), ret);
+        }
+        return ret;
+    }
+
+    auto setValue(T value) -> void { mValue = value; }
     /**
      * @brief Get the value of the option
      *
@@ -140,22 +163,31 @@ template <mysql_option Optname>
 class OptionT<Optname, std::string, void> : public OptionBase {
 public:
     constexpr OptionT() = default;
-    constexpr OptionT(std::string value) : mValue(value) {}
+    constexpr OptionT(const std::string &value) : mValue(value) {}
     auto setopt(MYSQL &sql) const -> int override {
         auto ret = mysql_optionsv(&sql, Optname, mValue == "" ? nullptr : (void *)mValue.c_str());
         if (ret != 0) {
-            ILIAS_ERROR("sql", "option{} set error({})", (int)Optname, ret);
+            ILIAS_ERROR("sql", "option({}) set error({}).", detail::getMySqlOptName(Optname), ret);
+        }
+        else {
+            ILIAS_TRACE("sql", "option({}) set value({}).", detail::getMySqlOptName(Optname), mValue);
         }
         return ret;
     }
-    // auto getopt(MYSQL &sql) const -> int override {
-    //     auto ret = mysql_get_optionv(&sql, Optname, (void *)mValue.data());
-    //     if (ret != 0) {
-    //         ILIAS_ERROR("sql", "option{} get error({})", Optname, ret);
-    //     }
-    //     return ret;
-    // }
 
+    auto getopt(MYSQL &sql) -> int override {
+        const char *value = nullptr;
+        auto        ret   = mysql_get_optionv(&sql, Optname, &value);
+        if (ret != 0) {
+            ILIAS_ERROR("sql", "option({}) get error({}).", detail::getMySqlOptName(Optname), ret);
+        }
+        else {
+            mValue = std::string(value);
+        }
+        return ret;
+    }
+
+    auto setValue(std::string_view value) -> void { mValue = value; }
     /**
      * @brief Get the value of the option
      *

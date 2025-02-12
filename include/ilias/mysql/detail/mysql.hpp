@@ -109,6 +109,7 @@ public:
     // stmt
     auto stmtInit() -> MYSQL_STMT *;
     auto setOpt(const sqlopt::OptionBase &opt) -> int;
+    auto getOpt(sqlopt::OptionBase &opt) -> int;
     auto close() -> void;
     auto lastError() -> SqlError;
     auto lastErrorMessage() -> const char *;
@@ -130,6 +131,7 @@ inline MySql::MySql() {
     if (mysql_init(&mMysql) == nullptr) {
         ILIAS_ERROR("sql", "mysql init failed");
     }
+    
     auto ret = mysql_options(&mMysql, MYSQL_OPT_NONBLOCK, 0);
     if (ret != 0) {
         ILIAS_ERROR("sql", "mysql set option failed, {}", SqlError(static_cast<SqlError::Code>(ret)).message());
@@ -179,13 +181,14 @@ inline auto MySql::pollStatus(int &status, uint32_t pollEvents) -> IoTask<void> 
     else {
         auto ret = co_await (mPoller.poll(pollEvents) | setTimeout(std::chrono::milliseconds(timeOut)));
         if (!ret) {
+            if (ret.error() == Error::TimedOut) {
+                status = MYSQL_WAIT_TIMEOUT;
+            }
             ILIAS_ERROR("sql", "poll failed, no result in poll.");
             co_return Unexpected<Error>(ret.error());
         }
     }
-    if (status & MYSQL_WAIT_TIMEOUT) {
-        status = MYSQL_WAIT_TIMEOUT;
-    }
+    status = 0;
     if (ret.value_or(0) & POLLIN) {
         status |= MYSQL_WAIT_READ;
     }
@@ -438,6 +441,10 @@ inline auto MySql::readQueryResult() -> IoTask<void> {
 
 inline auto MySql::setOpt(const sqlopt::OptionBase &opt) -> int {
     return opt.setopt(mMysql);
+}
+
+inline auto MySql::getOpt(sqlopt::OptionBase &opt) -> int {
+    return opt.getopt(mMysql);
 }
 
 inline auto MySql::stmtInit() -> MYSQL_STMT * {
