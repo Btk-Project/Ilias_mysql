@@ -7,9 +7,21 @@ option("sql")
     set_description("add sql support")
 option_end()
 
+option("sqlite")
+    set_default(true)
+    set_showmenu(true)
+    set_category("module")
+    set_description("add sqlite support")
+option_end()
+
 if has_config("sql") then
     add_requires("mariadb-connector-c")
     add_packages("mariadb-connector-c")
+end
+
+if has_config("sqlite") then
+    add_requires("sqlite3")
+    add_packages("sqlite3")
 end
 
 -- Make all files in the unit directory into targets

@@ -128,7 +128,7 @@ inline auto SqlQuery::execute(std::string_view query) -> IoTask<SqlResult> {
     if (!ret1) {
         co_return Unexpected<Error>(ret1.error());
     }
-    co_return sqlResult;
+    co_return SqlResult(std::move(sqlResult));
 }
 
 // this query should like "SELECT * FROM table WHERE name=:name,age=:age;"
@@ -457,7 +457,7 @@ inline auto SqlQuery::execute() -> IoTask<SqlResult> {
     if (!ret1) {
         co_return Unexpected<Error>(ret1.error());
     }
-    co_return sqlResult;
+    co_return SqlResult(std::move(sqlResult));
 }
 
 inline auto SqlQuery::clearBinds() -> void {

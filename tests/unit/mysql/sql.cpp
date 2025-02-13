@@ -133,16 +133,16 @@ ILIAS_NAMESPACE::Task<void> test() {
         co_return;
     }
     auto result = std::move(ret.value());
-    ILIAS_INFO("sql-test", "select size {}", result->countRows());
-    while (co_await result->next()) {
-        auto        id      = result->get<int>("id").value_or(-1);
-        auto        name    = result->get<std::string>("name").value_or("null");
-        auto        age     = result->get<int>("age").value_or(-1);
-        auto        born    = result->get<SqlDate>("born").value_or(SqlDate());
-        auto        email   = result->get<std::string>("email").value_or("null");
-        auto        promise = result->get<std::vector<std::byte>>("promise").value();
-        auto        val1    = result->get<char>("val1").value();
-        auto        val2    = result->get<int>("val2").value();
+    ILIAS_INFO("sql-test", "select size {}", result.countRows());
+    while (co_await result.next()) {
+        auto        id      = result.get<int>("id").value_or(-1);
+        auto        name    = result.get<std::string>("name").value_or("null");
+        auto        age     = result.get<int>("age").value_or(-1);
+        auto        born    = result.get<SqlDate>("born").value_or(SqlDate());
+        auto        email   = result.get<std::string>("email").value_or("null");
+        auto        promise = result.get<std::vector<std::byte>>("promise").value();
+        auto        val1    = result.get<char>("val1").value();
+        auto        val2    = result.get<int>("val2").value();
         std::string str;
         for (auto &b : promise) {
             str += std::to_string(static_cast<int>(b)) + ".";
