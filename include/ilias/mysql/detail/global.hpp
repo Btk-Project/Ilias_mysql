@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Ilias/ilias.hpp>
+#include <ilias/ilias.hpp>
 
 #ifndef ILIAS_SQL_NAMESPACE
 #define ILIAS_SQL_NAMESPACE sql

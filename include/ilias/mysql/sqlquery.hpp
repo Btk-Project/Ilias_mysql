@@ -22,7 +22,6 @@
 #include "detail/global.hpp"
 #include "detail/mysql.hpp"
 #include "detail/sqlresultp.hpp"
-#include "detail/typehlep.hpp"
 #include "sqldatabase.hpp"
 #include "sqlresult.hpp"
 
@@ -65,7 +64,7 @@ public:
     ///> set TEXT, CHAR, VARCHAR
     auto set(int index, const std::u8string &value) -> SqlError;
     ///> set value
-    template <detail::SetAble<SqlQuery> T>
+    template <typename T>
     auto set(const std::string &name, const T &value) -> SqlError;
 
     ///> set TEXT, CHAR, VARCHAR, this api will not copy, Please ensure that the data is valid during execute.
@@ -75,8 +74,8 @@ public:
     ///> set BLOB, BINARY, VARBINARY, this api will not copy, Please ensure that the data is voalid during execute.
     auto setView(int index, std::span<const std::byte> value) -> SqlError;
     ///> set valueViwe, this api will not copy, Please ensure that the data is voalid during execute.
-    template <detail::SetViewAble<SqlQuery> T>
-    auto setView(const std::string &name, T value) -> SqlError;
+    template <typename T>
+    auto setView(const std::string &name, const T &value) -> SqlError;
 
     auto clearBinds() -> void;
 
@@ -192,7 +191,7 @@ inline auto SqlQuery::prepare(std::string_view query) -> IoTask<void> {
     co_return {};
 }
 
-template <detail::SetAble<SqlQuery> T>
+template <typename T>
 inline auto SqlQuery::set(const std::string &name, const T &value) -> SqlError {
     auto index = mIndexs.find(name);
     if (index == mIndexs.end()) {
@@ -201,8 +200,8 @@ inline auto SqlQuery::set(const std::string &name, const T &value) -> SqlError {
     return set(index->second, value);
 }
 
-template <detail::SetViewAble<SqlQuery> T>
-inline auto SqlQuery::setView(const std::string &name, T value) -> SqlError {
+template <typename T>
+inline auto SqlQuery::setView(const std::string &name, const T &value) -> SqlError {
     auto index = mIndexs.find(name);
     if (index == mIndexs.end()) {
         return SqlError::INVALID_INDEX;

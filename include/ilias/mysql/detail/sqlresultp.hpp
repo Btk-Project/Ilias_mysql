@@ -24,7 +24,7 @@ public:
     auto get(std::string_view name) -> Result<SqlResultType> override;
     auto countRows() -> size_t override;
 
-private:
+protected:
     [[nodiscard("Don't forget to use co_await")]]
     auto getResult() -> IoTask<void>;
     [[nodiscard("Don't forget to use co_await")]]
@@ -37,7 +37,7 @@ private:
     MYSQL_ROW                      mCurrentRow = nullptr;
     std::vector<MYSQL_FIELD *>     mFieldMetas = {};
 
-    friend class SqlQuery;
+    friend class ::ILIAS_SQL_COMPLETE_NAMESPACE::SqlQuery;
 };
 
 class SqlStmtResult final : public SqlResultBase {
@@ -53,7 +53,7 @@ public:
     auto get(std::string_view name) -> Result<SqlResultType> override;
     auto countRows() -> size_t override;
 
-private:
+protected:
     [[nodiscard("Don't forget to use co_await")]]
     auto getResult() -> IoTask<void>;
     [[nodiscard("Don't forget to use co_await")]]
@@ -77,7 +77,7 @@ private:
     std::unique_ptr<MYSQL_BIND[]>                               mBinds;
     std::unique_ptr<unsigned long[]>                            mLengths;
 
-    friend class SqlQuery;
+    friend class ::ILIAS_SQL_COMPLETE_NAMESPACE::SqlQuery;
 };
 
 inline SqlQueryResult::SqlQueryResult(SqlQueryResult &&other) {

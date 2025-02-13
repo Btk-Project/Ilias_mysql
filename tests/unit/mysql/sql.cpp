@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <ilias/platform.hpp>
-#include "ilias/mysql/detail/mysql.hpp"
 #include "ilias/mysql/sqlquery.hpp"
 #include "ilias/mysql/sqlresult.hpp"
 
